@@ -1,0 +1,25 @@
+# Intermediate build caches & upstream clone
+boxes_repo/
+python-embed.zip
+payload.zip
+payload/python/
+generate_readme_assets.py
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Runtime & OS temp files
+*.tmp
+*.log
+Thumbs.db
+Desktop.ini
+.DS_Store
+initial_config.json
+payload/initial_config.json
+
+# IDE folders
+.vs/
+.vscode/
+.idea/
