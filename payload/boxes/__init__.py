@@ -357,6 +357,7 @@ class Boxes:
         self.edgesettings: dict[Any, Any] = {}
         self.non_default_args: dict[Any, Any] = {}
         self.translations = gettext.NullTranslations()
+        self._auto_part_counter = 0
 
         short_description: str = ""
         if self.__doc__:
@@ -469,8 +470,19 @@ class Boxes:
         if self.ctx is not None:
             return
 
+        self._auto_part_counter = 0
+        if self.format == "stl":
+            self.burn = 0.0
+            self.tabs = 0.0
+            self.inner_corners = "corner"
+            self.reference = 0.0
+
         self.bedBoltSettings = (3, 5.5, 2, 20, 15)  # d, d_nut, h_nut, l, l1
         self.surface, self.ctx = self.formats.getSurface(self.format)
+
+        if self.format == "stl":
+            self.surface.thickness = self.thickness
+            self.surface.box_name = self.__class__.__name__
 
         if self.format == 'svg_Ponoko':
             self.ctx.set_line_width(0.01)
@@ -482,7 +494,8 @@ class Boxes:
         self.spacing = 2 * self.burn + self.spacing[0] * self.thickness + self.spacing[1]
         self.set_font("sans-serif")
         self._buildObjects()
-        if self.reference and self.format != 'svg_Ponoko':
+        if self.reference and self.format not in ('svg_Ponoko', 'stl'):
+            self.ctx._dwg._p.is_reference = True
             self.move(self.reference, 10, "up", before=True)
             self.ctx.rectangle(0, 0, self.reference, 10)
             if self.reference < 80:
@@ -1298,7 +1311,12 @@ class Boxes:
             # restore position
             self.ctx.stroke()
             self.ctx.restore()
-            if self.labels and label:
+            if "only" not in terms and not getattr(self.ctx._dwg._p, "is_reference", False):
+                if not label:
+                    self._auto_part_counter += 1
+                    label = f"Part {self._auto_part_counter}"
+                self.ctx._dwg._p.label = str(label)
+            if self.labels and label and self.format != "stl":
                 self.text(label, x/2, y/2, align="middle center", color=Color.ANNOTATIONS, fontsize=4)
                 self.ctx.stroke()
 

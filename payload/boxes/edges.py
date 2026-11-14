@@ -838,16 +838,21 @@ class SlottedEdge(BaseEdge):
         return self.edge.margin()
 
     def __call__(self, length, **kw):
+        slot_offset = 0.10 if (getattr(self.boxes, "format", "") == "stl" and self.slots) else 0.0
+        half_off = slot_offset * 0.5
+        n_sec = len(self.sections)
 
-        for l in self.sections[:-1]:
-            self.edge(l)
+        for idx, l in enumerate(self.sections[:-1]):
+            adj = (half_off if idx > 0 else 0.0) + half_off
+            self.edge(max(0.0, l - adj))
 
             if self.slots:
-                Slot(self.boxes, self.slots)(self.settings.thickness)
+                Slot(self.boxes, self.slots)(self.settings.thickness + slot_offset)
             else:
                 self.boxes.edge(self.settings.thickness)
 
-        self.edge(self.sections[-1])
+        last_adj = half_off if n_sec > 1 else 0.0
+        self.edge(max(0.0, self.sections[-1] - last_adj))
 
 
 #############################################################################
@@ -994,6 +999,9 @@ class FingerJointEdge(BaseEdge, FingerJointBase):
         thickness = self.settings.thickness
         style = self.settings.style
         play = self.settings.play
+        is_stl = (getattr(self.boxes, "format", "") == "stl")
+        if is_stl:
+            play = max(play, 0.05)
 
         fingers, leftover = self.calcFingers(length, bedBolts)
 
@@ -1005,10 +1013,15 @@ class FingerJointEdge(BaseEdge, FingerJointBase):
             bedBolts = None
             style = "rectangular"
 
-        if not positive:
-            f += play
-            s -= play
-            leftover -= play
+        if fingers > 0:
+            if not positive:
+                f += play
+                s -= play
+                leftover -= play
+            elif is_stl:
+                f = max(0.1, f - 0.05)
+                s += 0.05
+                leftover += 0.05
 
         self.edge(leftover / 2.0, tabs=1)
 
@@ -1076,6 +1089,9 @@ class FingerHoles(FingerJointBase):
             self.boxes.moveTo(x, y, angle)
             s, f = self.settings.space, self.settings.finger
             p = self.settings.play
+            is_stl = (getattr(self.boxes, "format", "") == "stl")
+            p_len = max(p, 0.05) if is_stl else p
+            p_wid = max(p, 0.10) if is_stl else p
             b = self.boxes.burn
             fingers, leftover = self.calcFingers(length, bedBolts)
 
@@ -1097,7 +1113,7 @@ class FingerHoles(FingerJointBase):
                     self.boxes.hole(pos - 0.5 * s, 0, d * 0.5)
 
                 self.boxes.rectangularHole(pos + 0.5 * f, 0,
-                                           f + p, self.settings.width + p)
+                                           f + p_len, self.settings.width + p_wid)
 
 
 class FingerHoleEdge(BaseEdge):
@@ -2103,7 +2119,7 @@ class LidSideRight(BaseEdge):
 
     def __call__(self, length, **kw):
         t = self.boxes.thickness
-        s = self.settings.play
+        s = max(self.settings.play, 0.10) if getattr(self.boxes, "format", "") == "stl" else self.settings.play
         pin = self.settings.second_pin
         edge_width = self.settings.edge_width
         r = edge_width / 3
@@ -2280,18 +2296,19 @@ class ClickEdge(ClickConnector):
         t = self.settings.thickness
         o = self.hookOffset()
         w = self.hookWidth()
+        click_off = 0.05 if getattr(self.boxes, "format", "") == "stl" else 0.0
         p1 = (
-            4 * t + o,
+            4 * t + o - click_off,
             90,
             t,
             -90,
-            2 * (t + w - o),
+            2 * (t + w - o) + 2 * click_off,
             -90,
             t,
             90,
             0)
         self.polyline(*p1)
-        self.edge(length - 2 * (6 * t + 2 * w) + 2 * o, tabs=2)
+        self.edge(length - 2 * (6 * t + 2 * w) + 2 * o - 2 * click_off, tabs=2)
         self.polyline(*reversed(p1))
 
 
@@ -2357,22 +2374,23 @@ class DoveTailJoint(BaseEdge):
             return
 
         p = 1 if positive else -1
+        stl_off = (0.05 if positive else -0.05) if getattr(self.boxes, "format", "") == "stl" else 0.0
 
-        self.edge((s.size + leftover) / 2.0 + diffx - l1, tabs=1)
+        self.edge((s.size + leftover) / 2.0 + diffx - l1 + 0.5 * stl_off, tabs=1)
 
         for i in range(sections):
             self.corner(-1 * p * a, radius)
             self.edge(2 * (l2 - l1))
             self.corner(p * a, radius)
-            self.edge(2 * (diffx - l1) + s.size)
+            self.edge(2 * (diffx - l1) + s.size - stl_off)
             self.corner(p * a, radius)
             self.edge(2 * (l2 - l1))
             self.corner(-1 * p * a, radius)
 
             if i < sections - 1:  # all but the last
-                self.edge(2 * (diffx - l1) + s.size)
+                self.edge(2 * (diffx - l1) + s.size + stl_off)
 
-        self.edge((s.size + leftover) / 2.0 + diffx - l1, tabs=1)
+        self.edge((s.size + leftover) / 2.0 + diffx - l1 + 0.5 * stl_off, tabs=1)
 
     def margin(self) -> float:
         """ """

@@ -116,6 +116,9 @@ class Surface:
 
 class Part:
     def __init__(self, name) -> None:
+        self.name = name
+        self.label = ""
+        self.is_reference = False
         self.pathes: list[Any] = []
         self.path: list[Any] = []
 

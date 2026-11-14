@@ -9,7 +9,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-0ea5e9.svg)](#kurulum-sihirbazı-ve-hızlı-başlangıç)
 [![Python](https://img.shields.io/badge/Python-3.11.9%20Embedded-3776AB.svg)](#mimari-ve-kaynak-koddan-derleme)
 [![Generators](https://img.shields.io/badge/Parametric%20Models-196%20%C3%9Cretici-f59e0b.svg)](#196-parametrik-kutu-üretici--kategori-vitrini)
-[![Formats](https://img.shields.io/badge/Exports-SVG%20%7C%20DXF%20%7C%20G--Code%20%7C%20LBRN2%20%7C%20PDF%20%7C%20PLT-8b5cf6.svg)](#desteklenen-lazer-ve-cnc-çıktı-formatları)
+[![Formats](https://img.shields.io/badge/Exports-SVG%20%7C%20DXF%20%7C%203D%20STL%20(.zip)%20%7C%20G--Code%20%7C%20LBRN2%20%7C%20PDF%20%7C%20PLT-8b5cf6.svg)](#desteklenen-lazer-ve-cnc-çıktı-formatları)
 
 <br />
 
@@ -38,6 +38,7 @@ Resmi **Boxes.py** motorundaki **196 parametrik üreticinin** tamamı ve 480+ g�
 2. **Masaüstü Başlatıcısı & Sistem Tepsisi (`BoxesPy_Studio.exe`):** Yerel döngü adresi (`127.0.0.1:18950+`) üzerinde gizli sunucuyu ayağa kaldırır, Microsoft Edge / Google Chrome'u uygulama penceresi (`--app`) modunda açar ve sistem tepsisinden tek tıkla yönetim sağlar.
 3. **Harici Araç Gerektirmeyen Yerel Format Dönüştürücüler:** [`payload/boxes/formats.py`](payload/boxes/formats.py) içinde geliştirilen saf Python dönüştürücüler (`_ps_to_dxf`, `_ps_to_gcode`, `_ps_to_plt`, `_ps_to_pdf`) sayesinde **pstoedit** veya **Ghostscript** kurulumu olmadan `DXF`, `G-Code`, `LightBurn (.lbrn2)`, `PDF`, `PLT`, `SVG` ve `PS` dosyaları doğrudan üretilir.
 4. **Türkçe Dil Paketi (`tr`) & Hızlı Çoklu İş Parçacığı Sunucusu:** [`build_locales.py`](build_locales.py) ile oluşturulan Türkçe arayüz çevirisi (`payload/locale/tr/LC_MESSAGES/boxes.py.mo`) ve [`payload/boxes/scripts/boxesserver.py`](payload/boxes/scripts/boxesserver.py) içindeki `ThreadingWSGIServer` mimarisi ile canlı SVG önizleme ve görsel galeri anlık yüklenir.
+5. **3D STL (`.zip`) Eklentisi ([`payload/boxes/stl_exporter.py`](payload/boxes/stl_exporter.py)):** Üretilen tüm parçaları seçilen malzeme kalınlığında (`thickness`) ikili (binary) 3D `.stl` dosyasına dönüştürür; geçki yerlerinde `0.1 mm` montaj tolerans boşluğu uygular, 2D parça adlarını yalnızca `.stl` dosya adı olarak kullanır (3D model üzerinde yazı oluşturmaz) ve **"3D STL (.zip) Klasöre Kaydet..."** düğmesiyle kullanıcının seçtiği klasöre `.zip` olarak kaydeder.
 
 ---
 
@@ -142,6 +143,7 @@ Harici `pstoedit` veya `ps2pdf` ikili dosyaları kurulmamış sistemlerde dahi [
 | **`pdf`** | `.pdf` | Vektörel baskı şablonu ve belge paylaşımı (PDF 1.4 vektör yolları) | Yerel saf Python `_ps_to_pdf` (veya sistemdeki `ps2pdf`) |
 | **`plt`** | `.plt` | HPGL (40 birim/mm) destekli kesici plotter ve endüstriyel makineler | Yerel saf Python `_ps_to_plt` |
 | **`ps`** | `.ps` | Ham PostScript vektör çıkışı | Doğrudan `PSSurface` motoru |
+| **`stl`** | `.zip` (`.stl`) | 3D yazıcı & CAD montajı (parça adına göre `.stl`, geçkilerde `0.1 mm` boşluk, yazısız mesh) | Yerel `STLSurface` & Shapely Delaunay 3D ekstrüzyon (`stl_exporter.py`) |
 
 ---
 
@@ -152,7 +154,7 @@ flowchart LR
     A["Setup_BoxesPy_Studio.exe<br/>(SetupProgram.cs + Gömülü payload.zip)"] -->|"5 Adımlı Kurulum<br/>+ initial_config.json"| B["Kurulum Dizini<br/>(%LOCALAPPDATA%\\BoxesPy_Studio)"]
     B --> C["BoxesPy_Studio.exe<br/>(Program.cs — Sistem Tepsisi)"]
     C -->|"Gizli Arka Plan İşlemi<br/>127.0.0.1:18950+"| D["Gömülü Python 3.11.9<br/>boxesserver.py (ThreadingWSGIServer)"]
-    D -->|"Yerel TR/EN Dil &amp; Vektör Çıktı<br/>SVG / DXF / LBRN2 / GCode / PDF"| E["Edge / Chrome --app Penceresi"]
+    D -->|"Yerel TR/EN Dil &amp; Vektör / 3D Çıktı<br/>SVG / STL (.zip) / DXF / LBRN2 / GCode / PDF"| E["Edge / Chrome --app Penceresi"]
 ```
 
 ### Depo Yapısı
@@ -160,7 +162,8 @@ flowchart LR
 - [`SetupProgram.cs`](SetupProgram.cs) — 5 adımlı grafiksel Windows kurulum sihirbazı ve `--silent-install` motoru
 - [`Program.cs`](Program.cs) — Tek örnek korumalı (`Mutex`), sistem tepsili masaüstü başlatıcısı
 - [`build_locales.py`](build_locales.py) — Türkçe `.po` oluşturucu ve `.mo` derleyici
-- [`payload/boxes/formats.py`](payload/boxes/formats.py) — Saf Python `DXF`, `G-Code`, `PLT` ve `PDF` dönüştürücü eklentisi
+- [`payload/boxes/stl_exporter.py`](payload/boxes/stl_exporter.py) — Shapely çokgenleştirme, constrained Delaunay 3D ekstrüzyon ve `.zip` paketleyici STL motoru
+- [`payload/boxes/formats.py`](payload/boxes/formats.py) — Saf Python `DXF`, `G-Code`, `PLT`, `PDF` ve `STL` format yönlendiricisi
 - [`payload/boxes/scripts/boxesserver.py`](payload/boxes/scripts/boxesserver.py) — `ThreadingWSGIServer` ve `initial_config.json` okuyuculu yerel HTTP sunucusu
 - [`build_exe.ps1`](build_exe.ps1), [`create_payload.ps1`](create_payload.ps1), [`build_setup.ps1`](build_setup.ps1) — `.NET Framework csc.exe` derleme ve paketleme betikleri
 

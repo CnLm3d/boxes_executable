@@ -45,17 +45,17 @@ class ABox(Boxes):
 
         with self.saved_context():
             self.rectangularWall(x, h, [b, sideedge, t1, sideedge],
-                                 ignore_widths=[1, 6], move="up")
+                                 ignore_widths=[1, 6], move="up", label="Front")
             self.rectangularWall(x, h, [b, sideedge, t3, sideedge],
-                                 ignore_widths=[1, 6], move="up")
+                                 ignore_widths=[1, 6], move="up", label="Back")
 
             if self.bottom_edge != "e":
-                self.rectangularWall(x, y, "ffff", move="up")
+                self.rectangularWall(x, y, "ffff", move="up", label="Bottom")
             self.lid(x, y)
 
         self.rectangularWall(x, h, [b, sideedge, t3, sideedge],
                              ignore_widths=[1, 6], move="right only")
         self.rectangularWall(y, h, [b, "f", t2, "f"],
-                             ignore_widths=[1, 6], move="up")
+                             ignore_widths=[1, 6], move="up", label="Left")
         self.rectangularWall(y, h, [b, "f", t4, "f"],
-                             ignore_widths=[1, 6], move="up")
+                             ignore_widths=[1, 6], move="up", label="Right")

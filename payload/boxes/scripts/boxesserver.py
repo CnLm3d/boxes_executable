@@ -23,10 +23,12 @@ import io
 import mimetypes
 import os.path
 import re
+import subprocess
 import sys
 import threading
 import time
 import traceback
+import zipfile
 from pathlib import Path
 from typing import Any, NoReturn
 import json
@@ -314,7 +316,56 @@ class BServer:
     <button name="render" value="2" formtarget="_self">{_("Download")}</button>
     <button name="render" value="0" formtarget="_self">{_("Save to URL")}</button>
     <button name="render" value="3" formtarget="_blank">{_("QR Code")}</button>
+    <button type="button" id="btn_save_stl_zip" onclick="saveSTLZipToFolder('{name}')" style="background:#0284c7;color:#fff;font-weight:600;padding:6px 14px;border-radius:5px;border:none;cursor:pointer;margin-left:4px;">&#x1F9CA; {_("Save 3D STL (.zip) to Folder...")}</button>
 </p>
+<div id="stl_status_box" style="display:none;margin:8px 0 12px 0;padding:10px 14px;border-radius:6px;background:#f0f9ff;border:1px solid #bae6fd;color:#0c4a6e;font-size:13px;"></div>
+<script>
+function saveSTLZipToFolder(boxName) {{
+    const box = document.getElementById("stl_status_box");
+    const btn = document.getElementById("btn_save_stl_zip");
+    const form = document.querySelector("#arguments");
+    const formData = new FormData(form);
+    formData.set("format", "stl");
+    const qs = new URLSearchParams(formData).toString();
+    if (btn) btn.disabled = true;
+    box.style.display = "block";
+    box.style.background = "#f0f9ff";
+    box.style.borderColor = "#bae6fd";
+    box.style.color = "#0c4a6e";
+    box.innerHTML = "{_("3D STL dosyaları oluşturuluyor ve klasör seçimi bekleniyor...")}";
+    fetch("./SaveSTLZip/" + encodeURIComponent(boxName) + "?" + qs)
+        .then(r => r.json())
+        .then(res => {{
+            if (btn) btn.disabled = false;
+            if (res.status === "saved") {{
+                const filesHtml = (res.files || []).map(f => "<code>" + f + "</code>").join(", ");
+                box.style.background = "#ecfdf5";
+                box.style.borderColor = "#a7f3d0";
+                box.style.color = "#065f46";
+                box.innerHTML = "<b>&#x2705; {_("3D STL ZIP kaydedildi")}:</b> <code>" + res.path + "</code><br>"
+                    + "<small><b>{_("Parçalar")}:</b> " + filesHtml + "</small><br><br>"
+                    + '<button type="button" onclick="openSTLFolder(' + JSON.stringify(res.path) + ')" style="background:#059669;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;">&#x1F4C2; {_("Klasörde Göster")}</button>';
+            }} else if (res.status === "cancelled") {{
+                box.style.display = "none";
+            }} else {{
+                box.style.background = "#fef2f2";
+                box.style.borderColor = "#fecaca";
+                box.style.color = "#991b1b";
+                box.innerHTML = "<b>{_("Hata")}:</b> " + (res.error || "Unknown error");
+            }}
+        }})
+        .catch(err => {{
+            if (btn) btn.disabled = false;
+            box.style.background = "#fef2f2";
+            box.style.borderColor = "#fecaca";
+            box.style.color = "#991b1b";
+            box.innerHTML = "<b>{_("Hata")}:</b> " + err;
+        }});
+}}
+function openSTLFolder(savedPath) {{
+    fetch("./OpenFolder?path=" + encodeURIComponent(savedPath));
+}}
+</script>
 </form>
 </div>
 
@@ -653,6 +704,23 @@ class BServer:
         if environ["PATH_INFO"].startswith("/static/"):
             return self.serveStatic(environ, start_response)
 
+        if environ["PATH_INFO"] == "/OpenFolder":
+            params = [unquote_plus(a) for a in environ.get("QUERY_STRING", "").split("&") if a]
+            target_path = ""
+            for a in params:
+                if a.startswith("path="):
+                    target_path = a[len("path="):]
+                    break
+            if target_path and os.path.exists(target_path):
+                subprocess.Popen(["explorer.exe", f"/select,{os.path.normpath(target_path)}"])
+            elif target_path and os.path.isdir(os.path.dirname(target_path)):
+                subprocess.Popen(["explorer.exe", os.path.normpath(os.path.dirname(target_path))])
+            start_response("200 OK", [("Content-type", "application/json; charset=utf-8")])
+            return [json.dumps({"status": "ok"}).encode("utf-8")]
+
+        if environ["PATH_INFO"].startswith("/SaveSTLZip/"):
+            return self.serveSaveSTLZip(environ, start_response)
+
         status = '200 OK'
         headers = [('Content-type', 'text/html; charset=utf-8'), ('X-XSS-Protection', '1; mode=block'), ('X-Content-Type-Options', 'nosniff'), ('x-frame-options', 'SAMEORIGIN'), ('Referrer-Policy', 'no-referrer')]
 
@@ -741,11 +809,89 @@ class BServer:
 
         if box.format != "svg" or render == "2":
             extension = box.format
+            fname = f"{box.__class__.__name__}.{extension}"
             if extension == "svg_Ponoko":
-                extension = "svg"
-            http_headers.append(('Content-Disposition', f'attachment; filename="{box.__class__.__name__}.{extension}"'))
+                fname = f"{box.__class__.__name__}.svg"
+            elif extension == "stl":
+                fname = f"{box.__class__.__name__}_3D_STL.zip"
+            http_headers.append(('Content-Disposition', f'attachment; filename="{fname}"'))
         start_response(status, http_headers)
         return environ['wsgi.file_wrapper'](data, 512 * 1024)
+
+    def serveSaveSTLZip(self, environ, start_response):
+        name = environ["PATH_INFO"][len("/SaveSTLZip/"):].strip("/")
+        box_cls = self.boxes.get(name, None)
+        if not box_cls:
+            start_response("404 Not Found", [("Content-type", "application/json; charset=utf-8")])
+            return [json.dumps({"status": "error", "error": f"Unknown generator: {name}"}).encode("utf-8")]
+
+        raw_args = [unquote_plus(a) for a in environ.get("QUERY_STRING", "").split("&") if a]
+        lang = self.getLanguage(raw_args, environ.get("HTTP_ACCEPT_LANGUAGE", ""))
+        cli_args = [
+            "--" + a for a in raw_args
+            if not a.startswith("render=") and not a.startswith("format=")
+        ]
+        cli_args.append("--format=stl")
+
+        try:
+            box = box_cls()
+            box.translations = lang
+            box.parseArgs(cli_args)
+            box.metadata["url"] = self.getURL(environ)
+            box.metadata["url_short"] = filter_url(box.metadata["url"], box.non_default_args)
+            box.open()
+            box.render()
+            zip_stream = box.close()
+            zip_bytes = zip_stream.getvalue()
+            with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+                stl_files = zf.namelist()
+        except Exception as e:
+            traceback.print_exc()
+            start_response("500 Internal Server Error", [("Content-type", "application/json; charset=utf-8")])
+            return [json.dumps({"status": "error", "error": str(e)}).encode("utf-8")]
+
+        default_fname = f"{name}_3D_STL.zip"
+        ps_script = (
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$owner = New-Object System.Windows.Forms.Form; $owner.TopMost = $true; "
+            "$dlg = New-Object System.Windows.Forms.SaveFileDialog; "
+            "$dlg.Title = '3D STL ZIP Kayıt Konumu Seçin'; "
+            "$dlg.Filter = 'ZIP Arşivi (*.zip)|*.zip'; "
+            f"$dlg.FileName = '{default_fname}'; "
+            "if ($dlg.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { "
+            "[Console]::Out.Write($dlg.FileName) }; "
+            "$owner.Dispose()"
+        )
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            proc = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-STA", "-Command", ps_script],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                creationflags=creationflags,
+                timeout=300,
+            )
+            chosen_path = (proc.stdout or "").strip()
+        except Exception as e:
+            start_response("500 Internal Server Error", [("Content-type", "application/json; charset=utf-8")])
+            return [json.dumps({"status": "error", "error": str(e)}).encode("utf-8")]
+
+        if not chosen_path:
+            start_response("200 OK", [("Content-type", "application/json; charset=utf-8")])
+            return [json.dumps({"status": "cancelled"}).encode("utf-8")]
+
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(chosen_path)), exist_ok=True)
+            with open(chosen_path, "wb") as fp:
+                fp.write(zip_bytes)
+        except Exception as e:
+            start_response("500 Internal Server Error", [("Content-type", "application/json; charset=utf-8")])
+            return [json.dumps({"status": "error", "error": str(e)}).encode("utf-8")]
+
+        start_response("200 OK", [("Content-type", "application/json; charset=utf-8")])
+        return [json.dumps({"status": "saved", "path": chosen_path, "files": stl_files}, ensure_ascii=False).encode("utf-8")]
 
 
 def get_qrcode(url, format):
