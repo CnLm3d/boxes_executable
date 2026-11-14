@@ -320,13 +320,67 @@ class BServer:
 </p>
 <div id="stl_status_box" style="display:none;margin:8px 0 12px 0;padding:10px 14px;border-radius:6px;background:#f0f9ff;border:1px solid #bae6fd;color:#0c4a6e;font-size:13px;"></div>
 <script>
-function saveSTLZipToFolder(boxName) {{
+async function saveSTLZipToFolder(boxName) {{
     const box = document.getElementById("stl_status_box");
     const btn = document.getElementById("btn_save_stl_zip");
     const form = document.querySelector("#arguments");
     const formData = new FormData(form);
     formData.set("format", "stl");
     const qs = new URLSearchParams(formData).toString();
+
+    if (typeof window.showSaveFilePicker === "function") {{
+        let fileHandle = null;
+        try {{
+            fileHandle = await window.showSaveFilePicker({{
+                suggestedName: boxName + "_3D_STL.zip",
+                types: [{{
+                    description: "ZIP Arşivi (.zip)",
+                    accept: {{ "application/zip": [".zip"] }}
+                }}]
+            }});
+        }} catch (pickErr) {{
+            if (pickErr && pickErr.name === "AbortError") {{
+                box.style.display = "none";
+                return;
+            }}
+        }}
+        if (fileHandle) {{
+            if (btn) btn.disabled = true;
+            box.style.display = "block";
+            box.style.background = "#f0f9ff";
+            box.style.borderColor = "#bae6fd";
+            box.style.color = "#0c4a6e";
+            box.innerHTML = "{_("3D STL dosyaları oluşturuluyor ve klasör seçimi bekleniyor...")}";
+            try {{
+                const resp = await fetch("./SaveSTLZip/" + encodeURIComponent(boxName) + "?mode=blob&" + qs);
+                if (!resp.ok) {{
+                    const errText = await resp.text();
+                    throw new Error(errText || ("HTTP " + resp.status));
+                }}
+                const filesHdr = resp.headers.get("X-STL-Files");
+                const stlFiles = filesHdr ? JSON.parse(filesHdr) : [];
+                const blob = await resp.blob();
+                const writable = await fileHandle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                if (btn) btn.disabled = false;
+                const filesHtml = stlFiles.map(f => "<code>" + f + "</code>").join(", ");
+                box.style.background = "#ecfdf5";
+                box.style.borderColor = "#a7f3d0";
+                box.style.color = "#065f46";
+                box.innerHTML = "<b>&#x2705; {_("3D STL ZIP kaydedildi")}:</b> <code>" + fileHandle.name + "</code><br>"
+                    + "<small><b>{_("Parçalar")}:</b> " + filesHtml + "</small>";
+            }} catch (err) {{
+                if (btn) btn.disabled = false;
+                box.style.background = "#fef2f2";
+                box.style.borderColor = "#fecaca";
+                box.style.color = "#991b1b";
+                box.innerHTML = "<b>{_("Hata")}:</b> " + (err.message || err);
+            }}
+            return;
+        }}
+    }}
+
     if (btn) btn.disabled = true;
     box.style.display = "block";
     box.style.background = "#f0f9ff";
@@ -818,6 +872,53 @@ function openSTLFolder(savedPath) {{
         start_response(status, http_headers)
         return environ['wsgi.file_wrapper'](data, 512 * 1024)
 
+    def _win32_save_file_dialog(self, default_fname: str) -> str:
+        import ctypes
+        from ctypes import wintypes
+
+        class OPENFILENAMEW(ctypes.Structure):
+            _fields_ = [
+                ("lStructSize", wintypes.DWORD),
+                ("hwndOwner", wintypes.HWND),
+                ("hInstance", wintypes.HINSTANCE),
+                ("lpstrFilter", wintypes.LPCWSTR),
+                ("lpstrCustomFilter", wintypes.LPWSTR),
+                ("nMaxCustFilter", wintypes.DWORD),
+                ("nFilterIndex", wintypes.DWORD),
+                ("lpstrFile", wintypes.LPWSTR),
+                ("nMaxFile", wintypes.DWORD),
+                ("lpstrFileTitle", wintypes.LPWSTR),
+                ("nMaxFileTitle", wintypes.DWORD),
+                ("lpstrInitialDir", wintypes.LPCWSTR),
+                ("lpstrTitle", wintypes.LPCWSTR),
+                ("Flags", wintypes.DWORD),
+                ("nFileOffset", wintypes.WORD),
+                ("nFileExtension", wintypes.WORD),
+                ("lpstrDefExt", wintypes.LPCWSTR),
+                ("lCustData", wintypes.LPARAM),
+                ("lpfnHook", wintypes.LPVOID),
+                ("lpTemplateName", wintypes.LPCWSTR),
+                ("pvReserved", wintypes.LPVOID),
+                ("dwReserved", wintypes.DWORD),
+                ("FlagsEx", wintypes.DWORD),
+            ]
+
+        buf = ctypes.create_unicode_buffer(default_fname, 4096)
+        ofn = OPENFILENAMEW()
+        ofn.lStructSize = ctypes.sizeof(OPENFILENAMEW)
+        ofn.hwndOwner = ctypes.windll.user32.GetForegroundWindow()
+        ofn.lpstrFilter = "ZIP Arşivi (*.zip)\0*.zip\0"
+        ofn.nFilterIndex = 1
+        ofn.lpstrFile = ctypes.cast(buf, wintypes.LPWSTR)
+        ofn.nMaxFile = len(buf)
+        ofn.lpstrTitle = "3D STL ZIP Kayıt Konumu Seçin"
+        ofn.lpstrDefExt = "zip"
+        ofn.Flags = 0x0000080A  # OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR
+
+        if ctypes.windll.comdlg32.GetSaveFileNameW(ctypes.byref(ofn)):
+            return buf.value.strip()
+        return ""
+
     def serveSaveSTLZip(self, environ, start_response):
         name = environ["PATH_INFO"][len("/SaveSTLZip/"):].strip("/")
         box_cls = self.boxes.get(name, None)
@@ -827,9 +928,10 @@ function openSTLFolder(savedPath) {{
 
         raw_args = [unquote_plus(a) for a in environ.get("QUERY_STRING", "").split("&") if a]
         lang = self.getLanguage(raw_args, environ.get("HTTP_ACCEPT_LANGUAGE", ""))
+        is_blob_mode = ("mode=blob" in raw_args)
         cli_args = [
             "--" + a for a in raw_args
-            if not a.startswith("render=") and not a.startswith("format=")
+            if not a.startswith("render=") and not a.startswith("format=") and not a.startswith("mode=")
         ]
         cli_args.append("--format=stl")
 
@@ -851,29 +953,18 @@ function openSTLFolder(savedPath) {{
             return [json.dumps({"status": "error", "error": str(e)}).encode("utf-8")]
 
         default_fname = f"{name}_3D_STL.zip"
-        ps_script = (
-            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
-            "Add-Type -AssemblyName System.Windows.Forms; "
-            "$owner = New-Object System.Windows.Forms.Form; $owner.TopMost = $true; "
-            "$dlg = New-Object System.Windows.Forms.SaveFileDialog; "
-            "$dlg.Title = '3D STL ZIP Kayıt Konumu Seçin'; "
-            "$dlg.Filter = 'ZIP Arşivi (*.zip)|*.zip'; "
-            f"$dlg.FileName = '{default_fname}'; "
-            "if ($dlg.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { "
-            "[Console]::Out.Write($dlg.FileName) }; "
-            "$owner.Dispose()"
-        )
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        if is_blob_mode:
+            headers = [
+                ("Content-type", "application/zip"),
+                ("Content-Disposition", f'attachment; filename="{default_fname}"'),
+                ("X-STL-Files", json.dumps(stl_files)),
+                ("Cache-Control", "no-store"),
+            ]
+            start_response("200 OK", headers)
+            return [zip_bytes]
+
         try:
-            proc = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-STA", "-Command", ps_script],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                creationflags=creationflags,
-                timeout=300,
-            )
-            chosen_path = (proc.stdout or "").strip()
+            chosen_path = self._win32_save_file_dialog(default_fname)
         except Exception as e:
             start_response("500 Internal Server Error", [("Content-type", "application/json; charset=utf-8")])
             return [json.dumps({"status": "error", "error": str(e)}).encode("utf-8")]
