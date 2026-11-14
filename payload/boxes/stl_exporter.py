@@ -140,21 +140,27 @@ def part_to_polygons(part) -> list[Polygon]:
     if not polys:
         return []
 
-    # Even-odd containment nesting (outer solid vs inner cutout holes / islands)
-    polys.sort(key=lambda p: p.area, reverse=True)
-    result = None
+    # Extract outer shells of each elementary polygonized face for even-odd nesting
+    shells: list[Polygon] = []
     for p in polys:
-        p_clean = p.buffer(0)
-        if p_clean.is_empty or p_clean.area < 1e-2:
+        sh = Polygon(p.exterior).buffer(0)
+        if sh.is_empty or sh.area < 1e-2:
             continue
+        if any(abs(sh.area - prev.area) < 1e-3 and sh.equals(prev) for prev in shells):
+            continue
+        shells.append(sh)
+
+    shells.sort(key=lambda s: s.area, reverse=True)
+    result = None
+    for sh in shells:
         if result is None:
-            result = p_clean
+            result = sh
         else:
-            rep = p_clean.representative_point()
+            rep = sh.representative_point()
             if result.contains(rep):
-                result = result.difference(p_clean)
+                result = result.difference(sh)
             else:
-                result = result.union(p_clean)
+                result = result.union(sh)
 
     if result is None or result.is_empty:
         return []
